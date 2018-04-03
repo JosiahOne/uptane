@@ -31,6 +31,9 @@ import uptane.clients.secondary as secondary
 import uptane.common # verify sigs, create client dir structure, convert key
 import uptane.encoding.asn1_codec as asn1_codec
 
+from uptane.encoding.asn1_codec import DATATYPE_TIME_ATTESTATION
+from uptane.encoding.asn1_codec import DATATYPE_ECU_MANIFEST
+
 # For temporary convenience:
 import demo # for generate_key, import_public_key, import_private_key
 
@@ -408,6 +411,9 @@ class TestSecondary(unittest.TestCase):
       # The location of the files will be as follows, after the sample
       # metadata archive is expanded (in test 40 below):
 
+      # TODO: Determine if this code should be adjusted to use os.path.join(),
+      # or if that's not appropriate for file:// links.
+
       image_repo_mirror = ['file://' + client_dir + '/unverified/imagerepo']
       director_mirror = ['file://' + client_dir + '/unverified/director']
       if vin == '000':
@@ -477,7 +483,7 @@ class TestSecondary(unittest.TestCase):
     if tuf.conf.METADATA_FORMAT == 'der':
       # Convert this time attestation to the expected ASN.1/DER format.
       time_attestation = asn1_codec.convert_signed_metadata_to_der(
-          original_time_attestation,
+          original_time_attestation, DATATYPE_TIME_ATTESTATION,
           private_key=TestSecondary.key_timeserver_pri, resign=True)
 
     # If the time_attestation is not deemed valid, an exception will be raised.
@@ -490,7 +496,7 @@ class TestSecondary(unittest.TestCase):
       # Fail to re-sign the DER, so that the signature is over JSON instead,
       # which results in a bad signature.
       time_attestation__badsig = asn1_codec.convert_signed_metadata_to_der(
-          original_time_attestation, resign=False, datatype='time_attestation')
+          original_time_attestation, DATATYPE_TIME_ATTESTATION, resign=False)
 
     else: # 'json' format
       # Rewrite the first 9 digits of the signature ('sig') to something
@@ -520,7 +526,7 @@ class TestSecondary(unittest.TestCase):
     if tuf.conf.METADATA_FORMAT == 'der':
       # Convert this time attestation to the expected ASN.1/DER format.
       time_attestation__wrongnonce = asn1_codec.convert_signed_metadata_to_der(
-          time_attestation__wrongnonce,
+          time_attestation__wrongnonce, DATATYPE_TIME_ATTESTATION,
           private_key=TestSecondary.key_timeserver_pri, resign=True)
 
     with self.assertRaises(uptane.BadTimeAttestation):
@@ -547,7 +553,7 @@ class TestSecondary(unittest.TestCase):
     if tuf.conf.METADATA_FORMAT == 'der':
       uptane.formats.DER_DATA_SCHEMA.check_match(ecu_manifest)
       ecu_manifest = asn1_codec.convert_signed_der_to_dersigned_json(
-          ecu_manifest, datatype='ecu_manifest')
+          ecu_manifest, DATATYPE_ECU_MANIFEST)
 
     # Now it's not in DER format, whether or not it started that way.
     # Check its format and inspect it.
@@ -567,7 +573,7 @@ class TestSecondary(unittest.TestCase):
         TestSecondary.secondary_ecu_key,
         ecu_manifest['signatures'][0], # TODO: Deal with 1-sig assumption?
         ecu_manifest['signed'],
-        datatype='ecu_manifest'))
+        DATATYPE_ECU_MANIFEST))
 
 
 
@@ -693,6 +699,12 @@ class TestSecondary(unittest.TestCase):
     # Clients 1 and 2 should have no validated targets.
     self.assertFalse(secondary_instances[1].validated_targets_for_this_ecu)
     self.assertFalse(secondary_instances[2].validated_targets_for_this_ecu)
+
+
+    # Finally, test behavior if the file we indicate does not exist.
+    instance = secondary_instances[0]
+    with self.assertRaises(uptane.Error):
+      instance.process_metadata('some_file_that_does_not_actually_exist.xyz')
 
 
 

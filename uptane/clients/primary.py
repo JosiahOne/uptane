@@ -16,7 +16,6 @@
   the "Design Overview" and "Implementation Specification" documents, links to
   which are maintained at uptane.github.io
 """
-from __future__ import print_function
 from __future__ import unicode_literals
 
 import uptane # Import before TUF modules; may change tuf.conf values.
@@ -39,10 +38,17 @@ import uptane.services.director as director
 import uptane.services.timeserver as timeserver
 import uptane.encoding.asn1_codec as asn1_codec
 
+from uptane.encoding.asn1_codec import DATATYPE_TIME_ATTESTATION
+from uptane.encoding.asn1_codec import DATATYPE_ECU_MANIFEST
+from uptane.encoding.asn1_codec import DATATYPE_VEHICLE_MANIFEST
+
 from uptane import GREEN, RED, YELLOW, ENDCOLORS
 
-# The following import is a temporary measure to facilitate demonstration.
-# It does not ultimately belong here in the reference implementation.
+# The following two imports are only used for the Uptane demonstration, where
+# they enable delays and the display of splash banners indicating metadata
+# rejection during sequential metadata checks. These should be pulled out of
+# the reference implementation when possible.
+import time
 from demo.uptane_banners import *
 
 
@@ -78,7 +84,7 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
       unique.) The Director should be aware of this identifier.
 
     self.primary_key
-      The signing key for this Secondary ECU. This key will be used to sign
+      The signing key for this Primary ECU. This key will be used to sign
       Vehicle Manifests that will then be sent to the Director). The Director
       should be aware of the corresponding public key, so that it can validate
       these Vehicle Manifests. Conforms to tuf.formats.ANYKEY_SCHEMA.
@@ -263,6 +269,7 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
 
     # Check arguments:
     tuf.formats.PATH_SCHEMA.check_match(full_client_dir)
+    tuf.formats.REPOSITORY_NAME_SCHEMA.check_match(director_repo_name)
     tuf.formats.ISO8601_DATETIME_SCHEMA.check_match(time)
     uptane.formats.VIN_SCHEMA.check_match(vin)
     uptane.formats.ECU_SERIAL_SCHEMA.check_match(ecu_serial)
@@ -500,7 +507,7 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
     # This next block employs get_validated_target_info calls to determine what
     # the right fileinfo (hash, length, etc) for each target file is. This
     # begins by matching paths/patterns in pinned.json to determine which
-    # repository to connect to. Since pinned.json will generally assigns all
+    # repository to connect to. Since pinned.json will generally assign all
     # targets to a multi-repository delegation requiring consensus between the
     # two repositories, one for the Director and one for the Image Repository,
     # this call will retrieve metadata from both repositories and compare it to
@@ -529,15 +536,16 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
             'untrustworthy Image Repository, or the Director and Image '
             'Repository may be out of sync.' + ENDCOLORS)
 
-        # The following is code intended for a demonstration, inserted here
-        # into the reference implementation as a temporary measure.
-        print_banner(BANNER_DEFENDED, color=WHITE+DARK_BLUE_BG,
-            text='The Director has instructed us to download a file that does '
-            ' does not exactly match the Image Repository metadata. '
-            'File: ' + repr(target_filepath), sound=TADA)
-        import time
-        time.sleep(3)
-        # End demo code.
+        # If running the demo, display splash banner indicating the rejection.
+        # This clause should be pulled out of the reference implementation when
+        # possible.
+        if uptane.DEMO_MODE: # pragma: no cover
+          print_banner(BANNER_DEFENDED, color=WHITE+DARK_BLUE_BG,
+              text='The Director has instructed us to download a file that '
+              'does not exactly match the Image Repository metadata. '
+              'File: ' + repr(target_filepath), sound=TADA)
+          time.sleep(3)
+
 
     # # Grab a filepath from each of the dicts of target file infos. (Each dict
     # # corresponds to one file, and the filepaths in all the infos in that dict
@@ -596,14 +604,6 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
       full_fname = os.path.join(full_targets_directory, filepath)
       enforce_jail(filepath, full_targets_directory)
 
-      # TODO: Remove this. It's here for convenience during dev & testing.
-      # Considerations on the ground by implementers / users of the reference
-      # implementation will decide what to do with target files after they've
-      # been used.
-      # Delete existing targets.
-      if os.path.exists(full_fname):
-        os.remove(full_fname)
-
       # Download each target.
       # Now that we have fileinfo for all targets listed by both the Director and
       # the Image Repository -- which should include file2.txt in this test --
@@ -619,37 +619,40 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
         self.updater.download_target(target, full_targets_directory)
 
       except tuf.NoWorkingMirrorError as e:
-        print('')
-        print(YELLOW + 'In downloading target ' + repr(filepath) + ', am unable '
-            'to find a mirror providing a trustworthy file.\nChecking the mirrors'
-            ' resulted in these errors:')
+        error_report = ''
         for mirror in e.mirror_errors:
-          print('    ' + type(e.mirror_errors[mirror]).__name__ + ' from ' + mirror)
-        print(ENDCOLORS)
+          error_report += \
+              type(e.mirror_errors[mirror]).__name__ + ' from ' + mirror + '; '
+        log.info(YELLOW + 'In downloading target ' + repr(filepath) +
+            ', am unable to find a mirror providing a trustworthy file. '
+            'Checking the mirrors resulted in these errors:  ' + error_report +
+            ENDCOLORS)
 
-        print_banner(BANNER_DEFENDED, color=WHITE+DARK_BLUE_BG,
-            text='No image was found that exactly matches the signed metadata '
-            'from the Director and Image Repositories. Not keeping '
-            'untrustworthy files. ' + repr(target_filepath), sound=TADA)
-        import time
-        time.sleep(3)
+        # If running the demo, display splash banner indicating the rejection.
+        # This clause should be pulled out of the reference implementation when
+        # possible.
+        if uptane.DEMO_MODE: # pragma: no cover
+          print_banner(BANNER_DEFENDED, color=WHITE+DARK_BLUE_BG,
+              text='No image was found that exactly matches the signed metadata '
+              'from the Director and Image Repositories. Not keeping '
+              'untrustworthy files. ' + repr(target_filepath), sound=TADA)
+          time.sleep(3)
 
 
         # # If this was our firmware, notify that we're not installing.
         # if filepath.startswith('/') and filepath[1:] == firmware_filename or \
         #   not filepath.startswith('/') and filepath == firmware_filename:
 
-        print()
-        print(YELLOW + ' While the Director and Image Repository provided '
-            'consistent metadata for new firmware,')
-        print(' mirrors we contacted provided only untrustworthy images. ')
-        print(GREEN + 'We have rejected these. Firmware not updated.\n' + ENDCOLORS)
+        log.info(YELLOW + 'The Director and Image Repository provided '
+            'consistent metadata for new firmware, but contacted mirrors '
+            'provided only untrustworthy images, which have been ' + GREEN +
+            'rejected' + ENDCOLORS + ' Firmware not updated.')
 
       else:
-        assert(os.path.exists(full_fname)), 'Programming error: no download ' + \
-            'error, but file still does not exist.'
-        print(GREEN + 'Successfully downloaded a trustworthy ' + repr(filepath) +
-            ' image.' + ENDCOLORS)
+        assert(os.path.exists(full_fname)), 'Programming error: no ' + \
+            'download error, but file still does not exist.'
+        log.info(GREEN + 'Successfully downloaded trustworthy ' +
+            repr(filepath) + ' image.' + ENDCOLORS)
 
 
         # TODO: <~> There is an attack vector here, potentially, for a minor
@@ -814,7 +817,7 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
     # that form.
     if tuf.conf.METADATA_FORMAT == 'der':
       converted_attestation = asn1_codec.convert_signed_metadata_to_der(
-          most_recent_attestation, datatype='time_attestation')
+          most_recent_attestation, DATATYPE_TIME_ATTESTATION)
       uptane.formats.DER_DATA_SCHEMA.check_match(converted_attestation)
       return converted_attestation
 
@@ -823,7 +826,10 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
           most_recent_attestation)
       return most_recent_attestation
 
-    else:
+    # An unrecognized value in the setting tuf.conf.METADATA_FORMAT should not
+    # be allowed. This clause is provided so as to draw developer attention to
+    # this location if a new metadata format has been added.
+    else: # pragma: no cover
       raise uptane.Error('Unable to convert time attestation as configured. '
           'The settings supported for timeserver attestations are "json" and '
           '"der", but the value of tuf.conf.METADATA_FORMAT is: ' +
@@ -862,15 +868,15 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
     if tuf.conf.METADATA_FORMAT == 'der':
       # Convert to DER and sign, replacing the Python dictionary.
       signable_vehicle_manifest = asn1_codec.convert_signed_metadata_to_der(
-          signable_vehicle_manifest, private_key=self.primary_key,
-          resign=True, datatype='vehicle_manifest')
+          signable_vehicle_manifest, DATATYPE_VEHICLE_MANIFEST,
+          private_key=self.primary_key, resign=True)
 
     else:
       # If we're not using ASN.1, sign the Python dictionary in a JSON encoding.
       uptane.common.sign_signable(
           signable_vehicle_manifest,
           [self.primary_key],
-          datatype='vehicle_manifest')
+          DATATYPE_VEHICLE_MANIFEST)
 
       uptane.formats.SIGNABLE_VEHICLE_VERSION_MANIFEST_SCHEMA.check_match(
           signable_vehicle_manifest)
@@ -934,35 +940,102 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
   def register_ecu_manifest(
       self, vin, ecu_serial, nonce, signed_ecu_manifest, force_pydict=False):
     """
-    Called by Secondaries (in the demo, this is via an XMLRPC interface, or
-    through another interface and passed through the XMLRPC interface).
+    <Purpose>
+      Called by Secondaries (in the demo, this is via an XMLRPC interface, or
+      through another interface and passed through the XMLRPC interface).
 
-    The Primary need not track ECU serials, so calling this doesn't result in a
-    verification of the ECU's signature on the ECU manifest. This information
-    is bundled together in a single vehicle report to the Director service.
+      The Primary need not track ECU keys, so calling this doesn't result in a
+      verification of the ECU's signature on the ECU manifest. This information
+      is bundled together in a single vehicle report to the Director service.
 
-    Exceptions:
-      uptane.Spoofing     if ECU Serials within the manifest are inconsistent
-      uptane.UnknownECU   if the manifest is from an ECU that is not one of our
-                          Secondaries
-      uptane.Error        if the VIN for the report is not the same as our VIN
+    <Arguments>
+      vin
+          See class docstring above. The VIN of a Secondary in this vehicle
+          submitting an ECU Manifest is expected to be the same as the VIN for
+          this Primary. (In deployments where a Primary is shared -- for
+          example, a dealer device connected directly to a vehicle for manual
+          updates/modifications -- some code would have to be changed in a few
+          modules to remove this assumption.)
+
+      ecu_serial
+          The ECU Serial of the Secondary submitting the ECU Manifest. This
+          should match the ECU Serial listed in the signed manifest itself.
+
+      nonce
+          A (probably randomly generated) integer token produced by the
+          Secondary, which this Primary is expected to include in a request to
+          the Timeserver to produce a signed time that includes this token (and
+          others). When the Secondary receives the signed timeserver
+          attestation, if it sees this token in the signed contents of the
+          attestation, the Secondary can be reassured of the freshness of the
+          time attestation.
+
+      signed_ecu_manifest
+          The ECU Manifest a Secondary is submitting.
+
+          The expected format that signed_ecu_manifest should conform to is
+          based on the value of tuf.conf.METADATA_FORMAT:
+
+            if 'json': uptane.formats.SIGNABLE_ECU_VERSION_MANIFEST_SCHEMA,
+                       a JSON-compatible Python dictionary, the internal
+                       repreentation of an ECU Manifest
+
+            if 'der':  uptane.formats.DER_DATA_SCHEMA encoding data conforming
+                       to ECUVersionManifest specified in file ECUModule.asn1
+                       (and the Uptane Implementation Specification)
+
+          See force_pydict.
+
+      force_pydict (optional, default False)
+          When True, the function treats signed_ecu_manifest as if the value of
+          tuf.conf.METADATA_FORMAT is set to 'json'. See signed_ecu_manifest.
+
+    <Exceptions>
+
+      uptane.Spoofing
+          if ecu_serial is not the same as the ECU Serial listed in the
+          provided ECU Manifest itself.
+
+      uptane.UnknownECU
+          if ecu_serial is not one of this Primary's Secondaries
+
+      uptane.UnknownVehicle
+          if the VIN argument is not the same as this primary's VIN
+
+      tuf.FormatError
+          if any of the arguments are not in the expected formats.
+
+    <Returns>
+      None
+
+    <Side Effects>
+      self.ecu_manifests[ecu_serial] will contain signed_ecu_manifest
+      nonce will be added to self.nonces_to_send
+
     """
-    # check arg format and that serial is registered
+    # Check argument format and that ECU Serial is registered
     self._check_ecu_serial(ecu_serial)
     tuf.formats.BOOLEAN_SCHEMA.check_match(force_pydict)
+    uptane.formats.VIN_SCHEMA.check_match(vin)
+    uptane.formats.NONCE_SCHEMA.check_match(nonce)
+
 
     if vin != self.vin:
-      raise uptane.Error('Received an ECU Manifest supposedly hailing from a '
-          'different vehicle....')
+      raise uptane.UnknownVehicle('Received an ECU Manifest supposedly hailing '
+          'from a different vehicle....')
 
     if tuf.conf.METADATA_FORMAT == 'der' and not force_pydict:
+      uptane.formats.DER_DATA_SCHEMA.check_match(signed_ecu_manifest)
       # If we're working with ASN.1/DER, convert it into the format specified in
       # uptane.formats.SIGNABLE_ECU_VERSION_MANIFEST_SCHEMA.
       signed_ecu_manifest = asn1_codec.convert_signed_der_to_dersigned_json(
-          signed_ecu_manifest, datatype='ecu_manifest')
+          signed_ecu_manifest, DATATYPE_ECU_MANIFEST)
 
     # Else, we're working with standard Python dictionaries and no conversion
-    # is necessary.
+    # is necessary, but we'll still validate the signed_ecu_manifest argument.
+    else:
+      uptane.formats.SIGNABLE_ECU_VERSION_MANIFEST_SCHEMA.check_match(
+          signed_ecu_manifest)
 
     if ecu_serial != signed_ecu_manifest['signed']['ecu_serial']:
       # TODO: Choose an exception class.
@@ -1040,7 +1113,7 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
     # comprehensible instead.
     if tuf.conf.METADATA_FORMAT == 'der':
       timeserver_attestation = asn1_codec.convert_signed_der_to_dersigned_json(
-          timeserver_attestation)
+          timeserver_attestation, DATATYPE_TIME_ATTESTATION)
 
     # Check format.
     uptane.formats.SIGNABLE_TIMESERVER_ATTESTATION_SCHEMA.check_match(
@@ -1056,7 +1129,7 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
         self.timeserver_public_key,
         timeserver_attestation['signatures'][0],
         timeserver_attestation['signed'],
-        datatype='time_attestation')
+        DATATYPE_TIME_ATTESTATION)
 
     if not valid:
       raise tuf.BadSignatureError('Timeserver returned an invalid signature. '
@@ -1092,19 +1165,35 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
 
   def save_distributable_metadata_files(self):
     """
-    Generates a zip archive of the metadata files validated by this Primary,
-    for distribution to full verifying Secondaries. The particular method of
-    distributing this metadata to Secondaries will vary greatly depending on
-    one's setup, and is left to implementers.
+    Generates two metadata files, all validated by this Primary, placing them
+    in the expected locations available for distribution to Secondaries:
+
+      - self.distributable_full_metadata_archive_fname
+          a zip archive of all the metadata files, from all repositories,
+          validated by this Primary, for use by Full Verification Secondaries.
+
+      - self.distributable_partial_metadata_fname
+          the Director Targets role file alone, for use by Partial Verification
+          Secondaries
+
+    The particular method of distributing this metadata to Secondaries will
+    vary greatly depending on one's setup, and is left to implementers, so the
+    files are put in those locations and can be dealt with as desired by
+    implementers' higher level Primary code. (Example in demo/demo_primary.py)
+
+    The files here are each moved into place atomically to help avoid race
+    conditions.
     """
 
     metadata_base_dir = os.path.join(self.full_client_dir, 'metadata')
+
+    # Full Verification Metadata Preparation
 
     # Save a zipped version of all of the metadata.
     # Note that some stale metadata may be retained, but should never affect
     # security. Worth confirming.
     # What we want here, basically, is:
-    #  <full_client_dir>/metadata/*/current/*.json
+    #  <full_client_dir>/metadata/*/current/*.json or *.der
     with zipfile.ZipFile(self.temp_full_metadata_archive_fname, 'w') \
         as archive:
       # For each repository directory within the client metadata directory
@@ -1139,6 +1228,8 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
               os.path.join(repo_dir, 'metadata', role_fname))
 
 
+    # Partial Verification Metadata Preparation
+
     # Copy the Director's targets file to a temp location for partial-verifying
     # Secondaries.
     director_targets_file = os.path.join(
@@ -1151,8 +1242,10 @@ class Primary(object): # Consider inheriting from Secondary and refactoring.
       os.remove(self.temp_partial_metadata_fname)
     shutil.copyfile(director_targets_file, self.temp_partial_metadata_fname)
 
-    # Now move both files into place. For each file, this happens atomically
-    # on POSIX-compliant systems and replaces any existing file.
+
+    # Now move both Full and Partial metadata files into place. For each file,
+    # this happens atomically on POSIX-compliant systems and replaces any
+    # existing file.
     os.rename(
         self.temp_partial_metadata_fname,
         self.distributable_partial_metadata_fname)

@@ -2,14 +2,18 @@
 
 Reference Implementation and demonstration code
 
-[![Build Status](https://travis-ci.org/uptane/uptane.png)](https://travis-ci.org/uptane/uptane) [![Coverage Status](https://coveralls.io/repos/github/uptane/uptane/badge.svg?branch=develop)](https://coveralls.io/github/uptane/uptane?branch=develop)
+[![Build Status](https://travis-ci.org/uptane/uptane.png)](https://travis-ci.org/uptane/uptane) [![Coverage Status](https://coveralls.io/repos/github/uptane/uptane/badge.svg)](https://coveralls.io/github/uptane/uptane?branch=develop)
 --------------------------------
 
+# Documentation
 Extensive documentation on design can be found in the following documents:
 
 * [Design Overview](https://docs.google.com/document/d/1pBK--40BCg_ofww4GES0weYFB6tZRedAjUy6PJ4Rgzk/edit?usp=sharing)
 * [Implementation Specification](https://docs.google.com/document/d/1wjg3hl0iDLNh7jIRaHl3IXhwm0ssOtDje5NemyTBcaw/edit?usp=sharing)
 * [Deployment Considerations](https://docs.google.com/document/d/17wOs-T7mugwte5_Dt-KLGMsp-3_yAARejpFmrAMefSE/edit?usp=sharing)
+
+The project's [maintainers, contribution policies, and how-tos for submitting
+issues, security audits, etc. are visible in PROJECT.md](PROJECT.md)
 
 
 # Instructions on use of the Uptane demonstration code
@@ -32,7 +36,7 @@ implementation code, divided into these sections:
 
 
 # 0: Installation
-Uptane fully supports Python2 and Python3. As usual for Python, [virtual environments](https://python-docs.readthedocs.io/en/latest/dev/virtualenvs.html) are recommended for development and testing, but not necessary.
+Uptane supports Python2 and Python3. As usual for Python, [virtual environments](https://python-docs.readthedocs.io/en/latest/dev/virtualenvs.html) are recommended for development and testing, but not necessary.
 
 Some development libraries are necessary to install some of Uptane's dependencies. If your system uses apt, the command to install them will be:
 ```shell
@@ -83,78 +87,57 @@ better understand the workings of the reference implementation, see the
 
 
 # 1: Starting the Demo
-The code below is intended to be run in five or more consoles:
-- [WINDOW 1](#window-1-the-image-repository): Python shell for the Image Repository. This serves HTTP (repository files, including metadata).
-- [WINDOW 2](#window-2-the-director): Python shell for the Director (Repository and Service). This serves metadata and image files via HTTP,111
- and receives manifests from the Primary via XMLRPC.
-- [WINDOW 3](#window-3-the-timeserver): Bash shell for the Timeserver. This serves signed times in response to requests from the Primary via XMLRPC.
-- [WINDOW 4](#window-4-the-primary-clients): Python shell for a Primary client in the vehicle. This fetches images and metadata from the repositories via HTTP, and communicates with the Director service, Timeserver, and any Secondaries via XMLRPC. (More of these can be run, simulating more vehicles with one Primary each.)
-- [WINDOW 5](#window-5-the-secondary-clients): Python shell for a Secondary in the vehicle. This communicates directly only with the Primary via XMLRPC, and will perform full metadata verification. (More of these can be run, simulating more ECUs in one or more vehicles.)
+The code below is intended to be run in three or more consoles:
+- [WINDOW 1](#window-1-the-uptane-services): Python shell for the Uptane services
+- [WINDOW 2](#window-2-the-primary-clients): Python shell for a Primary client in the vehicle. This fetches images and metadata from the repositories via HTTP, and communicates with the Director service, Timeserver, and any Secondaries via XMLRPC. (More of these can be run, simulating more vehicles with one Primary each.)
+- [WINDOW 3](#window-3-the-secondary-clients): Python shell for a Secondary in the vehicle. This communicates directly only with the Primary via XMLRPC, and will perform full metadata verification. (More of these can be run, simulating more ECUs in one or more vehicles.)
 
 
 
-### WINDOW 1: the Image Repository
-These instructions start a demonstration version of an OEM's or Supplier's main repository
-for software, hosting images and the metadata Uptane requires.
-
-From within the root `uptane/` directory of the downloaded code (which contains e.g. the `setup.py` file), open an interactive
-Python shell from the command line. (Any version of Python >=2.7 should do, but
-we test 2.7, 3.3, 3.4, and 3.5.)
-
-```Bash
-$ python
-Python 2.7.6 (default, Oct 26 2016, 20:30:19)
-[GCC 4.8.4] on linux2
->>>
-```
-
-In the Python shell, run the following:
-
-```python
->>> import demo.demo_image_repo as di
->>> di.clean_slate()
-```
+### WINDOW 1: the Uptane services
+These instructions start a demonstration version of the three services that
+run OEM-side (or supplier-side, or fleet-side): the Image Repository,
+the Director, and the Timeserver.
 
 
-### WINDOW 2: the Director
-The following starts a Director server, which generates metadata for specific
+The Uptane documentation explains each of these services in greater detail,
+but in brief:
+
+**The Image Repository** is the main repository for images and general metadata
+about them.
+
+**The Director** generates metadata for specific
 vehicles indicating which ECUs should install what firmware (validated against
 and obtained from the Image Repository). It also receives and validates
 Vehicle Manifests from Primaries, and the ECU Manifests from Secondaries
-within the Vehicle Manifests, which capture trustworthy information about what
-software is running on the ECUs, along with signed reports of any attacks
-observed by those ECUs.
+that have been bundled in the Vehicle Manifests, which capture trustworthy
+information about what software is running on the ECUs, along with, optionally,
+signed reports of any attacks observed by those ECUs.
 
-Open a new Python shell in a new terminal window and then run the following:
+**The Timeserver** is a simple service that receives requests for signed
+times, each bundled by a vehicle Primary, and produces a signed attestation
+that includes the request tokens each Secondary ECU sent to its Primary, so
+that each ECU can better establish that it is not being tricked into accepting
+a false or very old time.
 
-```python
->>> import demo.demo_director as dd
->>> dd.clean_slate()
+
+From within the root `uptane/` directory of the downloaded code (which contains e.g. the `setup.py` file), run the following command. (Any version of Python > 2.7
+should do. We test on 2.7, 3.5, and 3.6.)
+
+```Bash
+$ python -i demo/start_servers.py
 ```
+
 
 After that, proceed to the following Windows to prepare clients.
 Once those are ready, you can perform a variety of modifications and attacks.
-Various manipulations can be made here to the Director's interface. Examples
-will be discussed below in the [Delivering an Update](#2-delivering-an-update)
-and [Blocking Attacks](#blocking-attacks) sections.
+Examples will be discussed below in the
+[Delivering an Update](#2-delivering-an-update) and
+[Blocking Attacks](#blocking-attacks) sections.
 
 
 
-### WINDOW 3: the Timeserver:
-The following starts a simple Timeserver, which receives requests for signed
-times, bundled by the Primary, and produces a signed attestation that includes
-the nonces each Secondary ECU sent the Primary to include along with the
-time request, so that each ECU can better establish that it is not being tricked
-into accepting a false time.
-
-In a new terminal window, run the following command:
-```Bash
-$ python demo/demo_timeserver.py
-```
-
-
-
-### WINDOW 4(+): the Primary client(s):
+### WINDOW 2(+): the Primary client(s):
 (Image Repo, Director, and Timeserver must already have finished starting up.)
 The Primary client started below is likely to run on a more capable and
 connected ECU in the vehicle - potentially the head unit / infotainment. It will
@@ -189,7 +172,7 @@ Example setting up a different Primary for a different vehicle:
 
 
 
-### WINDOW 5(+): the Secondary client(s):
+### WINDOW 3(+): the Secondary client(s):
 (The following assumes that the Image Repository, Director, Timeserver, and
 Primary have finished starting up and are hosting/listening.)
 Here, we start a single Secondary ECU and generate a signed ECU Manifest
@@ -207,7 +190,7 @@ Open a Python shell in a new terminal window and then run the following:
 Optionally, multiple windows with different Secondary clients can be run simultaneously. In each additional window, you can run the same calls as above to set up a new ECU in the same, default vehicle by modifying the clean_slate() call to include a distinct ECU Serial. e.g. `ds.clean_slate(ecu_serial='33333')`
 
 If the Secondary is in a different vehicle from the default vehicle, this call should look like:
-`ds.clean_slate(vin='112', ecu_serial='33333', primary_port='30702')`, providing a VIN for the new vehicle, a unique ECU Serial, and indicating the port listed by this Secondary's Primary when that Primary initialized (e.g. "Primary will now listen on port 30702").
+`ds.clean_slate(vin='vehicle_id_here', ecu_serial='ecu_serial_here', primary_port=30702)`, providing a VIN for the new vehicle, a unique ECU Serial, and indicating the port listed by this Secondary's Primary when that Primary initialized (e.g. "Primary will now listen on port 30702").
 
 The Secondary's update_cycle() call:
 - fetches and validates the signed metadata for the vehicle from the Primary
@@ -223,9 +206,10 @@ To deliver an Update via Uptane, you'll need to add the firmware image to the Im
 and ECU in the Director repository. Then, the Primary will obtain the new firmware, and the Secondary will update from the
 Primary.
 
-Execute the following code in the **Image Repository's** window (WINDOW 1) to create a new file, add it to the repository, and host
-newly-written metadata:
-
+Execute the following code in the Uptane services window (WINDOW 1) to create a
+new firmware file, generate metadata about it, sign that metadata with the
+appropriate keys (assigned by delegations in the Image Repository), and host
+the image and metadata on the Image Repository.
 
 ```python
 >>> firmware_fname = filepath_in_repo = 'firmware.img'
@@ -234,21 +218,20 @@ newly-written metadata:
 >>> di.write_to_live()
 ```
 
-Perform the following in the **Director Repository's** window (WINDOW 2) to assign that Image file to vehicle 111, ECU 22222:
+To assign the new image to the ecu 'TCUdemocar' on vehicle 'democar', run
+the following in the Uptane services window (WINDOW 1):
 ```python
->>> firmware_fname = filepath_in_repo = 'firmware.img'
->>> ecu_serial = '22222'
->>> vin = '111'
+>>> vin='democar'; ecu_serial='TCUdemocar'
 >>> dd.add_target_to_director(firmware_fname, filepath_in_repo, vin, ecu_serial)
 >>> dd.write_to_live(vin_to_update=vin)
 ```
 
-Next, you can update the Primary in the Primary's window (WINDOW 4):
+Next, you can update the Primary. In WINDOW 2:
 ```python
 >>> dp.update_cycle()
 ```
 
-When the Primary has finished, you can update the Secondary in the Secondary's window (WINDOW 5):
+When the Primary has finished, you can update the Secondary. In WINDOW 3:
 ```python
 >>> ds.update_cycle()
 ```
@@ -268,17 +251,17 @@ of the Arbitrary Package Attack.
 This is a simple attack simulating a Man in the Middle that provides a malicious image file. In this attack, the
 attacker does not have the keys to correctly sign new metadata (and so it is an exceptionally basic attack).
 
-In WINDOW 2, **Director's** window, run:
+In the Uptane services window (1):
 ```python
 >>> dd.mitm_arbitrary_package_attack(vin, firmware_fname)
 ```
 
-As a result of the attack above, the Director will instruct the secondary client in vehicle 111 to install *firmware.img*.
+As a result of the attack above, the Director will instruct the secondary client in the vehicle to install *firmware.img*.
 Since this file is not on (and validated by) the Image Repository, the Primary will refuse to download it
 (and a Full Verification Secondary would likewise refuse it even if a compromised Primary delivered it
 to the Secondary).
 
-In WINDOW 4, the **Primary's** window, run:
+In WINDOW 1, run:
 ```python
 >>> dp.update_cycle()
 ```
@@ -288,7 +271,7 @@ able to discard the manipulated file without even sending it to the Secondary.
 
 To resume experimenting with the repositories, run this script to put the
 repository back in a normal state (undoing what the attack did) by running the
-following in the **Director's** window:
+following in the services window (1):
 ```python
 >>> dd.undo_mitm_arbitrary_package_attack(vin, firmware_fname)
 ```
@@ -302,13 +285,13 @@ should updated successfully.
 In the previous section, the firmware available on the director repository was replaced with a malicious one.
 What if the image repository is corrupted with a malicious firmware?
 
-Run the following in WINDOW 1, the **Image Repository's** window.
+Run the following in WINDOW 1:
 ```python
 >>> di.mitm_arbitrary_package_attack(firmware_fname)
 ```
 
 You can see the update once again proceeding normally by running this in the
-**Primary's window** (WINDOW 4):
+Primary's window (2):
 ```python
 >>> dp.update_cycle()
 ```
@@ -327,14 +310,15 @@ Not decompressing http://localhost:30301/targets/firmware.img
 Update failed from http://localhost:30301/targets/firmware.img.
 BadHashError
 Failed to update /firmware.img from all mirrors: {u'http://localhost:30301/targets/firmware.img': BadHashError()}
-Downloading: u'http://localhost:30401/111/targets/firmware.img'
-Could not download URL: u'http://localhost:30401/111/targets/firmware.img'
+Downloading: u'http://localhost:30401/democar/targets/firmware.img'
+Could not download URL: u'http://localhost:30401/democar/targets/firmware.img'
 ```
 
 Uptane detected that the image retrieved did not have a hash matching what the
 signed, validated metadata indicated we should expect.
 
-Undo the the arbitrary package attack so that subsequent sections can be reproduced as expected.
+Undo the the arbitrary package attack so that subsequent demonstration sections
+can proceed.
 
 ```python
 >>> di.undo_mitm_arbitrary_package_attack(firmware_fname)
@@ -348,33 +332,33 @@ software, causing secondary clients to use older firmware than they
 currently trust. Rollback attacks in general are described in The
 [Deny Functionality subsection of the Design Overview](https://docs.google.com/document/d/1pBK--40BCg_ofww4GES0weYFB6tZRedAjUy6PJ4Rgzk/edit#heading=h.4mo91b3dvcqd).
 
-First, switch to the **Director's window** and copy the Timestamp role's
+First, switch to the services window and copy the Timestamp role's
 metadata, `timestamp.der` to a backup. This is what we'll roll back to in the
 attack.
 A function is available to perform this action:
 ```python
->>> dd.backup_timestamp(vin='111')
+>>> dd.backup_timestamp(vin)
 ```
 
 Now, we update the metadata in the Director repository. In this case, a fairly
 empty update, writing a new `timestamp.der` and `snapshot.der` files. The backup
 we saved earlier is now old by comparison.
 ```python
->>> dd.write_to_live()
+>>> dd.write_to_live(vin)
 ```
 
-In the **Primary's window**, the Primary client now performs an update,
+In the Primary's window (2), the Primary client now performs an update,
 retrieving the new metadata we generated.
 
 ```python
 >>> dp.update_cycle()
 ```
 
-Next, in the **Director's window**, we simulate the replay attack, trying to
+Next, in the services window, we simulate the replay attack, trying to
 distribute the out-of-date metadata backed up earlier, effectively rolling back
 the timestamp file to a previous version.
 ```python
->>> dd.replay_timestamp(vin='111')
+>>> dd.replay_timestamp(vin)
 ```
 
 If this old metadata is presented to the Primary, the Primary rejects it,
@@ -384,16 +368,16 @@ failure (ReplayedMetadataError exception). In the **Primary's window**:
 ```python
 >>> dp.update_cycle()
 ...
-Update failed from http://localhost:30401/111/metadata/timestamp.der.
+Update failed from http://localhost:30401/democar/metadata/timestamp.der.
 ReplayedMetadataError
 Failed to update timestamp.der from all mirrors:
-{u'http://localhost:30401/111/metadata/timestamp.der': ReplayedMetadataError()}
+{u'http://localhost:30401/democar/metadata/timestamp.der': ReplayedMetadataError()}
 ```
 
 Finally, restore the valid, latest version of Timestamp metadata
-(`timestamp.der`) back into place in the **Director's window**.
+(`timestamp.der`) into place in the services window.
 ```python
->>> dd.restore_timestamp(vin='111')
+>>> dd.restore_timestamp(vin)
 ```
 
 
@@ -420,11 +404,11 @@ will sign metadata certifying that malicious firmware file.
 
 To simulate a compromised directory key, we simply sign for an updated
 "firmware.img" that includes malicious content (the phrase "evil content" in
-this case), in the **Director's window**:
+this case), in the services window:
 
 ```python
 >>> dd.add_target_and_write_to_live(filename='firmware.img',
-    file_content='evil content', vin='111', ecu_serial='22222')
+    file_content='evil content', vin=vin, ecu_serial=ecu_serial)
 ```
 
 The primary client now attempts to download the malicious file.
@@ -432,8 +416,8 @@ The primary client now attempts to download the malicious file.
 >>> dp.update_cycle()
 ```
 
-The primary client should print a DEFENDED banner and provide the following error message: The Director has instructed
-us to download a file that does  does not exactly match the Image Repository metadata. File: '/firmware.img'
+The primary client should print a DEFENDED banner and provide the following error message: `The Director has instructed
+us to download a file that does not exactly match the Image Repository metadata. File: '/firmware.img'`
 
 
 
@@ -444,8 +428,10 @@ not enough to allow arbitrary package attacks against ECUs in the vehicle.
 The Director can only instruct clients to install images validated by the Image
 Repository.
 
-But what happens if, at the same time, the attacker is able to sign with an
-image-signing key for the Image Repository?
+But what happens if, at the same time, the attacker is able to sign with a
+high-level image-signing key trusted by the Image Repository? (Note that these
+should generally be offline keys and rarely need to be used.)
+With the previous attack still in place, let's add:
 ```python
 >>> di.add_target_and_write_to_live(filename='firmware.img', file_content='evil content')
 ```
@@ -464,7 +450,7 @@ On the **secondary** client:
 ```
 
 Note, both the image and director repositories have been compromised. As a
-result, unfortuantely, in an attack of this kind Secondary would install this
+result, unfortunately, in an attack of this kind Secondary would install this
 malicious firmware.img, which neither the Primary nor the
 Secondary have any way of knowing is malicious, since every necessary key has
 signed metadata for that image.
@@ -481,7 +467,25 @@ provides many recommendations. In particular, the
 [key placement recommendations](https://docs.google.com/document/d/17wOs-T7mugwte5_Dt-KLGMsp-3_yAARejpFmrAMefSE/view#heading=h.k5rokxr32wv6)
 indicate that Targets keys for the Image Repository are best kept offline; it
 should not be easy to compromise this top-level Image Repository Targets key
-and use it to sign malicious images.
+and use it to sign malicious images, as this key should be needed only when
+altering delegations (to parties who may sign for particular subsets of images).
+Depending on the way you deploy the system, this may be only when establishing a
+relationship with a new firmware supplier or revoking trust in them, for
+example.
+
+A more limited attack of this sort is possible against a subset of available
+firmware if rather than the top-level Image Repository targets keys, the
+attacker acquires the signing keys held by a party who has been delegated trust
+for a subset of images, such as a supplier the Image Repository has elected to
+trust to do the image signing for its own firmware releases to the Image
+Repository. While such delegated keys should also be held offline and need only
+be used when the delegatee produces new firmware, it is easier to imagine such
+a key being compromised than the Image Repository's top-level Targets role
+key(s). The structure of Uptane is flexible enough to accommodate almost any
+trust arrangement, allowing the impact of keys being lost to be limited to a
+small subset of images. Note that as before, this attack still requires also
+compromising the Director repository's Targets role keys or Root role keys.
+
 
 
 
@@ -495,22 +499,18 @@ deployment considerations are available in documentation
 [linked to above](#uptane).)
 
 Once the servers have been recovered, it is easy to revoke any keys that may
-have been compromised. We should also make sure that the targets in the
-repositories are correct, in case things have been changed by the attacker
-while in control. In this demo, these two things are done like so:
+have been compromised. We should also make sure that the targets and metadata
+in the repositories are correct again, in case things have been changed by the
+attacker while in control. In this demo, these two things are done like so:
 
-In the **Image** repository window:
+In the services window:
 ```
 >>> di.revoke_compromised_keys()
 >>> di.add_target_and_write_to_live(filename='firmware.img',
         file_content='Fresh firmware image')
-```
-
-And in the **Director** repository window:
-```
 >>> dd.revoke_compromised_keys()
 >>> dd.add_target_and_write_to_live(filename='firmware.img',
-    file_content='Fresh firmware image', vin='111', ecu_serial='22222')
+    file_content='Fresh firmware image', vin=vin, ecu_serial=ecu_serial)
 ```
 
 We have just used the rarely-needed root keys of the two repositories to
@@ -519,6 +519,17 @@ both repositories. This is the first time they have needed to be used since the
 repositories' creation at the beginning of this demo. Root keys should be
 kept offline, as discussed in
 the [Uptane Deployment Considerations document](https://docs.google.com/document/d/17wOs-T7mugwte5_Dt-KLGMsp-3_yAARejpFmrAMefSE/edit?usp=sharing).
+If trust in a key needs to be revoked, the keys at a level above it (or any
+level above that) can be used.
+In the case of the top-level roles (like Timestamp, Snapshot, and Targets here),
+that falls to Root to do. In the case of delegated Targets roles, the role
+that delegates would do the revocation. So, for example, if you delegate
+the ability to sign for firmware from a given vendor to the security team from
+that vendor, and that team delegates in turn to a particular release manager,
+and that release manager's YubiKey falls into the sewers, the security team
+from the vendor can remove trust in it and trust a new key. Alternatively, the
+top-level Targets role for the Image Repository could remove trust for the
+security team from the vendor, etc.
 
 Any client that receives the new metadata will be able to validate the root key
 and will cease trusting the revoked keys.
@@ -533,9 +544,10 @@ On the **secondary** client:
 >>> ds.update_cycle()
 ```
 
-As ever, if a particular ECU has been compromised and attacker code has been
-run on it, being certain that specific device is secured is of course difficult
-to assure. Devices that have not been compromised in such an attack, however,
+As ever, if a particular ECU has been compromised and arbitrary attacker code
+has been executed on it, being certain that specific device is secure again
+without wiping it manually is difficult. Devices that have not been compromised
+in such an attack, however,
 should thereafter be protected from the use of those compromised keys by an
 attacker.
 
@@ -552,7 +564,7 @@ Let's begin the demonstration by generating metadata that is maliciously
 signed with the keys revoked in the last section.
 
 ```Python
->>> dd.sign_with_compromised_keys_attack()
+>>> dd.sign_with_compromised_keys_attack(vin)
 ```
 
 
@@ -568,13 +580,13 @@ If you were to inspect the cause of the download failure, you'd find the
 following exception:
 
 ```
-Downloading: u'http://localhost:30401/111/metadata/timestamp.der'
+Downloading: u'http://localhost:30401/democar/metadata/timestamp.der'
 Downloaded 202 bytes out of an upper limit of 16384 bytes.
-Not decompressing http://localhost:30401/111/metadata/timestamp.der
+Not decompressing http://localhost:30401/democar/metadata/timestamp.der
 metadata_role: u'timestamp'
-Update failed from http://localhost:30401/111/metadata/timestamp.der.
+Update failed from http://localhost:30401/democar/metadata/timestamp.der.
 BadSignatureError
-Failed to update timestamp.der from all mirrors: {u'http://localhost:30401/111/metadata/timestamp.der': BadSignatureError()}
+Failed to update timestamp.der from all mirrors: {u'http://localhost:30401/democar/metadata/timestamp.der': BadSignatureError()}
 Valid top-level metadata cannot be downloaded.  Unsafely update the Root metadata.
 ```
 
@@ -583,7 +595,7 @@ keys had been revoked and where new keys were added for the Targets, Snapshot,
 and Timestamp roles.
 
 ```Python
->>> dd.undo_sign_with_compromised_keys_attack()
+>>> dd.undo_sign_with_compromised_keys_attack(vin)
 ```
 
 If the Primary initiates an update cycle once again, it would appear to be

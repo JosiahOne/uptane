@@ -53,6 +53,16 @@ from six.moves import xmlrpc_server # for the director services interface
 
 import atexit # to kill server process on exit()
 
+
+# Tell the reference implementation that we're in demo mode.
+# (Provided for consistency.) Currently, primary.py in the reference
+# implementation uses this to display banners for defenses that would otherwise
+# be hard to notice. No other reference implementation code (secondary.py,
+# director.py, etc.) currently uses this setting, but it could.
+uptane.DEMO_MODE = True
+
+LOG_PREFIX = uptane.TEAL_BG + 'Director:' + ENDCOLORS + ' '
+
 KNOWN_VINS = ['111', '112', '113', 'democar']
 
 # Dynamic global objects
@@ -77,12 +87,13 @@ def clean_slate(use_new_keys=False):
 
   # Create keys and/or load keys into memory.
 
+  print(LOG_PREFIX + 'Loading all keys')
+
   if use_new_keys:
     demo.generate_key('directorroot')
     demo.generate_key('directortimestamp')
     demo.generate_key('directorsnapshot')
     demo.generate_key('director') # targets
-
 
   key_dirroot_pub = demo.import_public_key('directorroot')
   key_dirroot_pri = demo.import_private_key('directorroot')
@@ -93,6 +104,8 @@ def clean_slate(use_new_keys=False):
   key_dirtarg_pub = demo.import_public_key('director')
   key_dirtarg_pri = demo.import_private_key('director')
 
+
+  print(LOG_PREFIX + 'Initializing vehicle repositories')
 
   # Create the demo Director instance.
   director_service_instance = director.Director(
@@ -129,6 +142,8 @@ def clean_slate(use_new_keys=False):
           vin,
           ecu)
 
+  print(LOG_PREFIX + 'Signing and hosting initial repository metadata')
+
   write_to_live()
 
   host()
@@ -161,7 +176,7 @@ def write_to_live(vin_to_update=None):
     # This shouldn't exist, but just in case something was interrupted,
     # warn and remove it.
     if os.path.exists(os.path.join(repo_dir, 'metadata.livetemp')):
-      print(YELLOW + 'Warning: metadata.livetemp existed already. '
+      print(LOG_PREFIX + YELLOW + 'Warning: metadata.livetemp existed already. '
           'Some previous process was interrupted, or there is a programming '
           'error.' + ENDCOLORS)
       shutil.rmtree(os.path.join(repo_dir, 'metadata.livetemp'))
@@ -185,7 +200,7 @@ def write_to_live(vin_to_update=None):
 
 
 
-def backup_repositories():
+def backup_repositories(vin=None):
   """
   <Purpose>
     Back up the last-written state (contents of the 'metadata.staged'
@@ -195,7 +210,10 @@ def backup_repositories():
     '{repo_dir}/metadata.backup'.
 
   <Arguments>
-    None.
+    vin (optional)
+      If not provided, all known vehicle repositories will be backed up.
+      You may also provide a single VIN (string) indicating one vehicle
+      repository to back up.
 
   <Exceptions>
     uptane.Error if backup already exists
@@ -206,7 +224,12 @@ def backup_repositories():
   <Returns>
     None.
   """
-  for vin in director_service_instance.vehicle_repositories:
+  if vin is None:
+    repos_to_backup = director_service_instance.vehicle_repositories.keys()
+  else:
+    repos_to_backup = [vin]
+
+  for vin in repos_to_backup:
     repo = director_service_instance.vehicle_repositories[vin]
     repo_dir = repo._repository_directory
 
@@ -215,7 +238,8 @@ def backup_repositories():
           repr(repo_dir) + '; please delete or restore this backup before '
           'trying to backup again.')
 
-    print('  Backing up ' + os.path.join(repo_dir, 'metadata.staged'))
+    print(LOG_PREFIX + ' Backing up ' +
+        os.path.join(repo_dir, 'metadata.staged'))
     shutil.copytree(os.path.join(repo_dir, 'metadata.staged'),
         os.path.join(repo_dir, 'metadata.backup'))
 
@@ -223,7 +247,7 @@ def backup_repositories():
 
 
 
-def restore_repositories():
+def restore_repositories(vin=None):
   """
   <Purpose>
     Restore the last backup of each Director repository.
@@ -232,7 +256,10 @@ def restore_repositories():
     '{repo_dir}/metadata.staged' and '{repo_dir}/metadata'
 
   <Arguments>
-    None.
+    vin (optional)
+      If not provided, all known vehicle repositories will be restored to their
+      backed-up state. You may also provide a single VIN (string) indicating
+      one vehicle to restore from backup.
 
   <Exceptions>
     uptane.Error if backup does not exist
@@ -243,8 +270,12 @@ def restore_repositories():
   <Returns>
     None.
   """
+  if vin is None:
+    repos_to_restore = director_service_instance.vehicle_repositories.keys()
+  else:
+    repos_to_restore = [vin]
 
-  for vin in director_service_instance.vehicle_repositories:
+  for vin in repos_to_restore:
 
     repo_dir = director_service_instance.vehicle_repositories[
         vin]._repository_directory
@@ -258,19 +289,20 @@ def restore_repositories():
           '; no backup exists.')
 
     # Empty the existing (old) live metadata directory (relatively fast).
-    print('  Deleting ' + os.path.join(repo_dir, 'metadata.staged'))
+    print(LOG_PREFIX + 'Deleting ' + os.path.join(repo_dir, 'metadata.staged'))
     if os.path.exists(os.path.join(repo_dir, 'metadata.staged')):
       shutil.rmtree(os.path.join(repo_dir, 'metadata.staged'))
 
     # Atomically move the new metadata into place.
-    print('  Moving backup to ' + os.path.join(repo_dir, 'metadata.staged'))
+    print(LOG_PREFIX + 'Moving backup to ' +
+        os.path.join(repo_dir, 'metadata.staged'))
     os.rename(os.path.join(repo_dir, 'metadata.backup'),
         os.path.join(repo_dir, 'metadata.staged'))
 
     # Re-load the repository from the restored metadata.stated directory.
     # (We're using a temp variable here, so we have to assign the new reference
     # to both the temp and the source variable.)
-    print('  Reloading repository from backup ' + repo_dir)
+    print(LOG_PREFIX + 'Reloading repository from backup ' + repo_dir)
     director_service_instance.vehicle_repositories[vin] = rt.load_repository(
         repo_dir)
 
@@ -286,14 +318,15 @@ def restore_repositories():
         os.path.join(repo_dir, 'metadata.livetemp'))
 
     # Empty the existing (old) live metadata directory (relatively fast).
-    print('  Deleting live hosted dir:' + os.path.join(repo_dir, 'metadata'))
+    print(LOG_PREFIX + 'Deleting live hosted dir:' +
+        os.path.join(repo_dir, 'metadata'))
     if os.path.exists(os.path.join(repo_dir, 'metadata')):
       shutil.rmtree(os.path.join(repo_dir, 'metadata'))
 
     # Atomically move the new metadata into place in the hosted directory.
     os.rename(os.path.join(repo_dir, 'metadata.livetemp'),
         os.path.join(repo_dir, 'metadata'))
-    print('Repository ' + repo_dir + ' restored and hosted.')
+    print(LOG_PREFIX + 'Repository ' + repo_dir + ' restored and hosted.')
 
 
 
@@ -397,7 +430,7 @@ def revoke_compromised_keys():
 
 
 
-def sign_with_compromised_keys_attack():
+def sign_with_compromised_keys_attack(vin=None):
   """
   <Purpose>
     Re-generate Timestamp, Snapshot, and Targets metadata for all vehicles and
@@ -409,7 +442,9 @@ def sign_with_compromised_keys_attack():
     instance is also updated with the key changes.
 
   <Arguments>
-    None.
+    vin (optional)
+      If not provided, all known vehicles will be attacked. You may also provide
+      a single VIN (string) indicating one vehicle to attack.
 
   <Side Effects>
     None.
@@ -423,11 +458,11 @@ def sign_with_compromised_keys_attack():
 
   global director_service_instance
 
-  print('ATTACK: arbitrary metadata, old key, all vehicles')
+  print(LOG_PREFIX + 'ATTACK: arbitrary metadata, old key, all vehicles')
 
   # Start by backing up the repository before the attack occurs so that we
   # can restore it afterwards in undo_sign_with_compromised_keys_attack.
-  backup_repositories()
+  backup_repositories(vin)
 
   # Load the now-revoked keys.
   old_targets_private_key = demo.import_private_key('director')
@@ -445,7 +480,12 @@ def sign_with_compromised_keys_attack():
 
   repo_dir = None
 
-  for vin in director_service_instance.vehicle_repositories:
+  if vin is None:
+    vehicles_to_attack = director_service_instance.vehicle_repositories.keys()
+  else:
+    vehicles_to_attack = [vin]
+
+  for vin in vehicles_to_attack:
 
     repository = director_service_instance.vehicle_repositories[vin]
     repo_dir = repository._repository_directory
@@ -482,13 +522,13 @@ def sign_with_compromised_keys_attack():
     os.rename(os.path.join(repo_dir, 'metadata.livetemp'),
         os.path.join(repo_dir, 'metadata'))
 
-  print('COMPLETED ATTACK')
+  print(LOG_PREFIX + 'COMPLETED ATTACK')
 
 
 
 
 
-def undo_sign_with_compromised_keys_attack():
+def undo_sign_with_compromised_keys_attack(vin=None):
   """
   <Purpose>
     Undo the actions executed by sign_with_compromised_keys_attack().  Namely,
@@ -496,7 +536,10 @@ def undo_sign_with_compromised_keys_attack():
     reload the valid keys for each repository.
 
   <Arguments>
-    None.
+    vin (optional)
+      If not provided, all known vehicles will be reverted to normal state from
+      attacked state. You may also provide a single VIN (string) indicating
+      one vehicle to undo the attack for.
 
   <Side Effects>
     None.
@@ -507,10 +550,6 @@ def undo_sign_with_compromised_keys_attack():
   <Returns>
     None.
   """
-
-  global director_service_instance
-
-
   # Re-load the valid keys, so that the repository objects can be updated to
   # reference them and replace the compromised keys set.
   valid_targets_private_key = demo.import_private_key('new_director')
@@ -528,9 +567,14 @@ def undo_sign_with_compromised_keys_attack():
   director_service_instance.key_dirsnap_pri = valid_snapshot_private_key
 
   # Revert to the last backup for all metadata in the Director repositories.
-  restore_repositories()
+  restore_repositories(vin)
 
-  for vin in director_service_instance.vehicle_repositories:
+  if vin is None:
+    vehicles_to_attack = director_service_instance.vehicle_repositories.keys()
+  else:
+    vehicles_to_attack = [vin]
+
+  for vin in vehicles_to_attack:
 
     repository = director_service_instance.vehicle_repositories[vin]
     repo_dir = repository._repository_directory
@@ -540,7 +584,7 @@ def undo_sign_with_compromised_keys_attack():
     repository.snapshot.load_signing_key(valid_snapshot_private_key)
     repository.timestamp.load_signing_key(valid_timestamp_private_key)
 
-  print('COMPLETED UNDO ATTACK')
+  print(LOG_PREFIX + 'COMPLETED UNDO ATTACK')
 
 
 
@@ -572,8 +616,6 @@ def add_target_to_director(target_fname, filepath_in_repo, vin, ecu_serial):
       Complies with uptane.formats.ECU_SERIAL_SCHEMA
 
   """
-  global director_service_instance
-
   uptane.formats.VIN_SCHEMA.check_match(vin)
   uptane.formats.ECU_SERIAL_SCHEMA.check_match(ecu_serial)
   tuf.formats.RELPATH_SCHEMA.check_match(target_fname)
@@ -586,14 +628,15 @@ def add_target_to_director(target_fname, filepath_in_repo, vin, ecu_serial):
   repo = director_service_instance.vehicle_repositories[vin]
   repo_dir = repo._repository_directory
 
-  print('Copying target file into place.')
+  print(LOG_PREFIX + 'Copying target file into place.')
   destination_filepath = os.path.join(repo_dir, 'targets', filepath_in_repo)
 
   # TODO: This should probably place the file into a common targets directory
   # that is then softlinked to all repositories.
   shutil.copy(target_fname, destination_filepath)
 
-  print('Adding target ' + repr(target_fname) + ' for ECU ' + repr(ecu_serial))
+  print(LOG_PREFIX + 'Adding target ' + repr(target_fname) + ' for ECU ' +
+      repr(ecu_serial))
 
   # This calls the appropriate vehicle repository.
   director_service_instance.add_target_for_ecu(
@@ -619,7 +662,7 @@ def host():
   global repo_server_process
 
   if repo_server_process is not None:
-    print('Sorry: there is already a server process running.')
+    print(LOG_PREFIX + 'Sorry: there is already a server process running.')
     return
 
   # Prepare to host the director repo contents.
@@ -639,10 +682,10 @@ def host():
 
   os.chdir(uptane.WORKING_DIR)
 
-  print('Director repo server process started, with pid ' + str(repo_server_process.pid))
-  print('Director repo serving on port: ' + str(demo.DIRECTOR_REPO_PORT))
-  url = demo.DIRECTOR_REPO_HOST + ':' + str(demo.DIRECTOR_REPO_PORT) + '/'
-  print('Director repo URL is: ' + url)
+  print(LOG_PREFIX + 'Director repo server process started, with pid ' +
+      str(repo_server_process.pid) + ', serving on port ' +
+      str(demo.DIRECTOR_REPO_PORT) + '. Director repo URL is: ' +
+      demo.DIRECTOR_REPO_HOST + ':' + str(demo.DIRECTOR_REPO_PORT) + '/')
 
   # Kill server process after calling exit().
   atexit.register(kill_server)
@@ -713,7 +756,8 @@ def listen():
   global director_service_thread
 
   if director_service_thread is not None:
-    print('Sorry: there is already a Director service thread listening.')
+    print(LOG_PREFIX + 'Sorry: there is already a Director service thread '
+        'listening.')
     return
 
   # Create server
@@ -785,8 +829,8 @@ def listen():
   server.register_function(undo_sign_with_compromised_keys_attack,
       'undo_sign_with_compromised_keys_attack')
 
-  print('Starting Director Services Thread: will now listen on port ' +
-      str(demo.DIRECTOR_SERVER_PORT))
+  print(LOG_PREFIX + 'Starting Director Services Thread: will now listen on '
+      'port ' + str(demo.DIRECTOR_SERVER_PORT))
   director_service_thread = threading.Thread(target=server.serve_forever)
   director_service_thread.setDaemon(True)
   director_service_thread.start()
@@ -801,8 +845,8 @@ def mitm_arbitrary_package_attack(vin, target_filepath):
   compromising any keys.  Move an evil target file into place on the Director
   repository without updating metadata.
   """
-  print('ATTACK: arbitrary package, no keys, on VIN ' + repr(vin) + ', '
-      'target_filepath ' + repr(target_filepath))
+  print(LOG_PREFIX + 'ATTACK: arbitrary package, no keys, on VIN ' +
+      repr(vin) + ', target_filepath ' + repr(target_filepath))
 
   full_target_filepath = os.path.join(demo.DIRECTOR_REPO_DIR, vin,
       'targets', target_filepath)
@@ -843,7 +887,7 @@ def mitm_arbitrary_package_attack(vin, target_filepath):
     file_object.write('EVIL UPDATE: ARBITRARY PACKAGE ATTACK TO BE'
         ' DELIVERED FROM MITM (no keys compromised).')
 
-  print('COMPLETED ATTACK')
+  print(LOG_PREFIX + 'COMPLETED ATTACK')
 
 
 
@@ -855,8 +899,8 @@ def undo_mitm_arbitrary_package_attack(vin, target_filepath):
   mitm_arbitrary_package_attack().  Move evil target file out and normal
   target file back in.
   """
-  print('UNDO ATTACK: arbitrary package, no keys, on VIN ' + repr(vin) + ', '
-      'target_filepath ' + repr(target_filepath))
+  print(LOG_PREFIX + 'UNDO ATTACK: arbitrary package, no keys, on VIN ' +
+      repr(vin) + ', target_filepath ' + repr(target_filepath))
 
   full_target_filepath = os.path.join(demo.DIRECTOR_REPO_DIR, vin,
       'targets', target_filepath)
@@ -889,7 +933,7 @@ def undo_mitm_arbitrary_package_attack(vin, target_filepath):
   elif os.path.exists(image_repo_backup_full_target_filepath):
     os.remove(image_repo_backup_full_target_filepath)
 
-  print('COMPLETED UNDO ATTACK')
+  print(LOG_PREFIX + 'COMPLETED UNDO ATTACK')
 
 
 
@@ -1005,12 +1049,13 @@ def prepare_replay_attack_nokeys(vin):
   version of the timestamp data. Then, replay_attack_nokeys() should be run to
   actually perform the attack.
   """
-  print('PREPARE ATTACK: replay attack, no keys, on VIN ' + repr(vin))
+  print(LOG_PREFIX + 'PREPARE ATTACK: replay attack, no keys, on VIN ' +
+      repr(vin))
 
   backup_timestamp(vin=vin)
   write_to_live(vin_to_update=vin)
 
-  print('COMPLETED ATTACK PREPARATION')
+  print(LOG_PREFIX + 'COMPLETED ATTACK PREPARATION')
 
 
 
@@ -1024,11 +1069,11 @@ def replay_attack_nokeys(vin):
   prepare_replay_attack_nokeys should be called first, and then the Primary
   should have updated before this is called.
   """
-  print('ATTACK: replay attack, no keys, on VIN ' + repr(vin))
+  print(LOG_PREFIX + 'ATTACK: replay attack, no keys, on VIN ' + repr(vin))
 
   replay_timestamp(vin=vin)
 
-  print('COMPLETED ATTACK')
+  print(LOG_PREFIX + 'COMPLETED ATTACK')
 
 
 
@@ -1041,11 +1086,11 @@ def undo_replay_attack_nokeys(vin):
 
   This attack is attack described in README.md, section 3.3.
   """
-  print('UNDO ATTACK: replay attack, no keys, on VIN ' + repr(vin))
+  print(LOG_PREFIX + 'UNDO ATTACK: replay attack, no keys, on VIN ' + repr(vin))
 
   restore_timestamp(vin=vin)
 
-  print('COMPLETED UNDO ATTACK')
+  print(LOG_PREFIX + 'COMPLETED UNDO ATTACK')
 
 
 
@@ -1059,7 +1104,7 @@ def keyed_arbitrary_package_attack(vin, ecu_serial, target_filepath):
 
   This attack is described in README.md, section 3.4.
   """
-  print('ATTACK: keyed_arbitrary_package_attack with parameters '
+  print(LOG_PREFIX + 'ATTACK: keyed_arbitrary_package_attack with parameters '
       ': vin ' + repr(vin) + '; ecu_serial ' + repr(ecu_serial) + '; '
       'target_filepath ' + repr(target_filepath))
 
@@ -1089,7 +1134,7 @@ def keyed_arbitrary_package_attack(vin, ecu_serial, target_filepath):
       target_filepath, file_content='evil content',
       vin=vin, ecu_serial=ecu_serial)
 
-  print('COMPLETED ATTACK')
+  print(LOG_PREFIX + 'COMPLETED ATTACK')
 
 
 
@@ -1108,9 +1153,9 @@ def undo_keyed_arbitrary_package_attack(vin, ecu_serial, target_filepath):
   This attack recovery is described in README.md, section 3.6.
   """
 
-  print('UNDO ATTACK: keyed arbitrary package attack with parameters '
-      ': vin ' + repr(vin) + '; ecu_serial ' + repr(ecu_serial) + '; '
-      'target_filepath ' + repr(target_filepath))
+  print(LOG_PREFIX + 'UNDO ATTACK: keyed arbitrary package attack with '
+      'parameters: vin ' + repr(vin) + '; ecu_serial ' + repr(ecu_serial) +
+      '; target_filepath ' + repr(target_filepath))
 
   # Revoke potentially compromised keys, replacing them with new keys.
   revoke_compromised_keys()
@@ -1119,7 +1164,7 @@ def undo_keyed_arbitrary_package_attack(vin, ecu_serial, target_filepath):
   add_target_and_write_to_live(filename=target_filepath,
       file_content='Fresh firmware image', vin=vin, ecu_serial=ecu_serial)
 
-  print('COMPLETED UNDO ATTACK')
+  print(LOG_PREFIX + 'COMPLETED UNDO ATTACK')
 
 
 
@@ -1139,7 +1184,7 @@ def clear_vehicle_targets(vin):
   TODO: In the future, adding a target assignment to the Director for a given
   ECU should replace any other target assignment for that ECU.
   """
-  print('CLEARING VEHICLE TARGETS for VIN ' + repr(vin))
+  print(LOG_PREFIX + 'CLEARING VEHICLE TARGETS for VIN ' + repr(vin))
   director_service_instance.vehicle_repositories[vin].targets.clear_targets()
 
 
@@ -1181,10 +1226,11 @@ def kill_server():
   global repo_server_process
 
   if repo_server_process is None:
-    print('No server to stop.')
+    print(LOG_PREFIX + 'No repository hosting process to stop.')
     return
 
   else:
-    print('Killing server process with pid: ' + str(repo_server_process.pid))
+    print(LOG_PREFIX + 'Killing repository hosting process with pid: ' +
+        str(repo_server_process.pid))
     repo_server_process.kill()
     repo_server_process = None

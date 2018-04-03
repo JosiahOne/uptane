@@ -44,6 +44,11 @@ def sign_signable(
     signable:
       An object with a 'signed' dictionary and a 'signatures' list:
       conforms to tuf.formats.SIGNABLE_SCHEMA
+      This may already include signatures, in which case signatures are added.
+      Signatures from the same key (that is, two signatures listing the same
+      keyid) will never be produced with this function (whether because a
+      key is provided twice in keys_to_sign_with, or because a key in
+      keys_to_sign_with has already signed this signable).
 
     keys_to_sign_with:
       A list whose elements must conform to tuf.formats.ANYKEY_SCHEMA.
@@ -78,7 +83,8 @@ def sign_signable(
     tuf.FormatError if the provided key is not the correct format or lacks a
     private element.
 
-    uptane.Error if the key type is not in the SUPPORTED_KEY_TYPES for Uptane.
+    uptane.Error if the key type is not in the SUPPORTED_KEY_TYPES for Uptane
+    or tuf.conf.METADATA_FORMAT is neither 'json' nor 'der'.
 
   <Side Effects>
     Adds a signature to the provided signable.
@@ -91,15 +97,22 @@ def sign_signable(
 
   # The below was partially modeled after tuf.repository_lib.sign_metadata()
 
-  signatures = []
-
   for signing_key in keys_to_sign_with:
 
     tuf.formats.ANYKEY_SCHEMA.check_match(signing_key)
 
+    # Populate a list of the keyids that have already signed, to prevent
+    # duplicate signatures.
+    keyids_that_already_signed = []
+    for sig in signable['signatures']:
+      if sig['keyid'] not in keyids_that_already_signed:
+        keyids_that_already_signed.append(sig['keyid'])
+
     # If we already have a signature with this keyid, skip.
-    if signing_key['keyid'] in [key['keyid'] for key in signatures]:
-      print('Already signed with this key.')
+    if signing_key['keyid'] in keyids_that_already_signed:
+      uptane.logger.debug('Skipping signing by key with keyid ' +
+          repr(signing_key['keyid']) + ' because there is already a signature '
+          'using that keyid.')
       continue
 
     # If the given key was public, raise a FormatError.
@@ -109,15 +122,17 @@ def sign_signable(
 
     # We should already be guaranteed to have a supported key type due to
     # the ANYKEY_SCHEMA.check_match call above. Defensive programming.
-    if signing_key['keytype'] not in SUPPORTED_KEY_TYPES:
+    if signing_key['keytype'] not in SUPPORTED_KEY_TYPES: # pragma: no cover
       raise uptane.Error(
           'Unsupported key type: ' + repr(signing_key['keytype']))
 
     # Else, all is well. Sign the signable with the given key, adding that
-    # signature to the signatures list in the signable.
+    # signature to the signatures list in the signable. Add the key used to the
+    # list of keys that have already signed and continue to the next key.
     signable['signatures'].append(sign_over_metadata(
-        signing_key, signable['signed'], datatype=datatype,
+        signing_key, signable['signed'], datatype,
         metadata_format=metadata_format))
+    keyids_that_already_signed.append(signing_key['keyid'])
 
   uptane.formats.ANY_SIGNABLE_UPTANE_METADATA_SCHEMA.check_match(signable)
 
@@ -214,8 +229,12 @@ def sign_over_metadata(
   <Exceptions>
     tuf.FormatError, if 'key_dict' is improperly formatted.
 
-    tuf.UnsupportedLibraryError, if an unsupported or unavailable library is
-    detected.
+    tuf.UnsupportedLibraryError, if an unsupported or unavailable cryptography
+    library is chosen.
+
+    uptane.Error, if the given metadata format is not 'json' or 'der' or if
+    the given datatype is not one of the accepted Uptane data types for
+    conversion (defined in constants asn1_codec.DATATYPE_*)
 
     TypeError, if 'key_dict' contains an invalid keytype.
 
@@ -244,11 +263,12 @@ def sign_over_metadata(
     # TODO: Have convert_signed_metadata_to_der take just the 'signed' element
     # so we don't have to do this silly wrapping in an empty signable.
     data = asn1_codec.convert_signed_metadata_to_der(
-        {'signed': data, 'signatures': []}, only_signed=True, datatype=datatype)
+        {'signed': data, 'signatures': []}, datatype, only_signed=True)
     data = hashlib.sha256(data).digest()
 
-  else:
-    raise tuf.Error('Unsupported metadata format: ' + repr(metadata_format))
+  else: # pragma: no cover
+    raise uptane.Error('Unsupported metadata format: ' + repr(metadata_format) +
+        '; the supported formats are: "der" and "json".')
 
 
   return tuf.keys.create_signature(key_dict, data)
@@ -349,6 +369,8 @@ def verify_signature_over_metadata(
     tuf.UnknownMethodError.  Raised if the signing method used by
     'signature' is not one supported.
 
+    uptane.Error, if tuf.conf.METADATA_FORMAT is neither 'json' nor 'der'.
+
   <Side Effects>
     The cryptography library specified in 'tuf.conf' is called to do the actual
     verification. When in 'der' mode, argument data is converted into ASN.1/DER
@@ -371,11 +393,12 @@ def verify_signature_over_metadata(
     # TODO: Have convert_signed_metadata_to_der take just the 'signed' element
     # so we don't have to do this silly wrapping in an empty signable.
     data = asn1_codec.convert_signed_metadata_to_der(
-        {'signed': data, 'signatures': []}, only_signed=True, datatype=datatype)
+        {'signed': data, 'signatures': []}, datatype, only_signed=True)
     data = hashlib.sha256(data).digest()
 
-  else:
-    raise tuf.Error('Unsupported metadata format: ' + repr(metadata_format))
+  else: # pragma: no cover
+    raise uptane.Error('Unsupported metadata format: ' + repr(metadata_format) +
+        '; the supported formats are: "der" and "json".')
 
 
   return tuf.keys.verify_signature(key_dict, signature, data)

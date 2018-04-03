@@ -39,6 +39,16 @@ from six.moves import xmlrpc_server # for the director services interface
 
 import atexit # to kill server process on exit()
 
+
+# Tell the reference implementation that we're in demo mode.
+# (Provided for consistency.) Currently, primary.py in the reference
+# implementation uses this to display banners for defenses that would otherwise
+# be hard to notice. No other reference implementation code (secondary.py,
+# director.py, etc.) currently uses this setting, but it could.
+uptane.DEMO_MODE = True
+
+LOG_PREFIX = uptane.PLUM_BG + 'ImageRepo:' + ENDCOLORS + ' '
+
 repo = None
 server_process = None
 xmlrpc_service_thread = None
@@ -47,6 +57,8 @@ xmlrpc_service_thread = None
 def clean_slate(use_new_keys=False):
 
   global repo
+
+  print(LOG_PREFIX + 'Initializing repository')
 
   # Create target files: file1.txt and infotainment_firmware.txt
 
@@ -67,6 +79,7 @@ def clean_slate(use_new_keys=False):
 
   repo = rt.create_new_repository(demo.IMAGE_REPO_NAME)
 
+  print(LOG_PREFIX + 'Loading all keys')
 
   # Create keys and/or load keys into memory.
 
@@ -127,6 +140,8 @@ def clean_slate(use_new_keys=False):
   add_target_to_imagerepo('demo/images/BCU1.2.txt', 'BCU1.2.txt')
 
 
+  print(LOG_PREFIX + 'Signing and hosting initial repository metadata')
+
   write_to_live()
 
   host()
@@ -164,19 +179,25 @@ def add_target_to_imagerepo(target_fname, filepath_in_repo):
   Given a filename pointing to a file in the targets directory, adds that file
   as a target file (calculating its cryptographic hash and length)
 
+  This doesn't employ delegations, which would have to be done manually.
+
   <Arguments>
     target_fname
       The full filename of the file to be added as a target to the image
-      repository's targets role metadata. This file should be in the targets
-      subdirectory of the repository directory.  This doesn't employ
-      delegations, which would have to be done manually.
+      repository's targets role metadata. The file will be copied into the
+      repository's targets directory from the given path.
+
+    filepath_in_repo
+      This is the name that will identify the file in the repository, and
+      the filepath it will have relative to the root of the repository's
+      targets directory.
   """
   global repo
 
   tuf.formats.RELPATH_SCHEMA.check_match(target_fname)
 
 
-  print('Copying target file into place.')
+  print(LOG_PREFIX + 'Copying target file into place.')
   repo_dir = repo._repository_directory
   destination_filepath = os.path.join(repo_dir, 'targets', filepath_in_repo)
 
@@ -193,7 +214,7 @@ def host():
   global server_process
 
   if server_process is not None:
-    print('Sorry: there is already a server process running.')
+    print(LOG_PREFIX + 'Sorry: there is already a server process running.')
     return
 
   # Prepare to host the main repo contents
@@ -213,10 +234,10 @@ def host():
 
   os.chdir(uptane.WORKING_DIR)
 
-  print('Main Repo server process started, with pid ' + str(server_process.pid))
-  print('Main Repo serving on port: ' + str(demo.IMAGE_REPO_PORT))
-  url = demo.IMAGE_REPO_HOST + ':' + str(demo.IMAGE_REPO_PORT) + '/'
-  print('Main Repo URL is: ' + url)
+  print(LOG_PREFIX + 'Main Repo server process started, with pid ' +
+      str(server_process.pid) + '; Main Repo serving on port: ' +
+      str(demo.IMAGE_REPO_PORT) + '; Main repo URL is ' +
+      demo.IMAGE_REPO_HOST + ':' + str(demo.IMAGE_REPO_PORT) + '/')
 
   # Kill server process after calling exit().
   atexit.register(kill_server)
@@ -258,7 +279,8 @@ def listen():
   global xmlrpc_service_thread
 
   if xmlrpc_service_thread is not None:
-    print('Sorry: there is already a listening Image Repository service thread')
+    print(LOG_PREFIX + 'Sorry: there is already a listening Image Repository '
+        'service thread.')
     return
 
   # Create server
@@ -292,8 +314,8 @@ def listen():
   server.register_function(undo_keyed_arbitrary_package_attack,
       'undo_keyed_arbitrary_package_attack')
 
-  print('Starting Image Repo Services Thread: will now listen on port ' +
-      str(demo.IMAGE_REPO_SERVICE_PORT))
+  print(LOG_PREFIX + 'Starting Image Repo Services Thread: will now listen on '
+      'port ' + str(demo.IMAGE_REPO_SERVICE_PORT))
   xmlrpc_service_thread = threading.Thread(target=server.serve_forever)
   xmlrpc_service_thread.setDaemon(True)
   xmlrpc_service_thread.start()
@@ -305,7 +327,7 @@ def mitm_arbitrary_package_attack(target_filepath):
   # Simulate an arbitrary package attack by a Man in the Middle, without
   # compromising keys.  Move evil target file into place on the image
   # repository, without updating metadata.
-  print('ATTACK: arbitrary package, no keys, on target ' +
+  print(LOG_PREFIX + 'ATTACK: arbitrary package, no keys, on target ' +
       repr(target_filepath))
 
   full_target_filepath = os.path.join(demo.IMAGE_REPO_TARGETS_DIR, target_filepath)
@@ -357,7 +379,7 @@ def undo_mitm_arbitrary_package_attack(target_filepath):
   mitm_arbitrary_package_attack().
   Move the evil target file out and normal target file back in.
   """
-  print('UNDO ATTACK: arbitrary package, no keys, on target ' +
+  print(LOG_PREFIX + 'UNDO ATTACK: arbitrary package, no keys, on target ' +
       repr(target_filepath))
 
   full_target_filepath = os.path.join(demo.IMAGE_REPO_TARGETS_DIR, target_filepath)
@@ -376,7 +398,7 @@ def undo_mitm_arbitrary_package_attack(target_filepath):
   # so we restore the backup over it.
   os.rename(backup_target_filepath, full_target_filepath)
 
-  print('COMPLETED UNDO ATTACK')
+  print(LOG_PREFIX + 'COMPLETED UNDO ATTACK')
 
 
 
@@ -390,8 +412,8 @@ def keyed_arbitrary_package_attack(target_filepath):
 
   This attack is described in README.md, section 3.5.
   """
-  print('ATTACK: keyed_arbitrary_package_attack on target_filepath ' +
-      repr(target_filepath))
+  print(LOG_PREFIX + 'ATTACK: keyed_arbitrary_package_attack on '
+      'target_filepath ' + repr(target_filepath))
 
 
   # TODO: Back up the image and then restore it in the undo function instead of
@@ -416,7 +438,7 @@ def keyed_arbitrary_package_attack(target_filepath):
   # Replace the given target with a malicious version.
   add_target_and_write_to_live(target_filepath, file_content='evil content')
 
-  print('COMPLETED ATTACK')
+  print(LOG_PREFIX + 'COMPLETED ATTACK')
 
 
 
@@ -434,8 +456,8 @@ def undo_keyed_arbitrary_package_attack(target_filepath):
 
   This attack recovery is described in README.md, section 3.6.
   """
-  print('UNDO ATTACK: keyed arbitrary package attack on target_filepath ' +
-      repr(target_filepath))
+  print(LOG_PREFIX + 'UNDO ATTACK: keyed arbitrary package attack on '
+      'target_filepath ' + repr(target_filepath))
 
   # Revoke potentially compromised keys, replacing them with new keys.
   revoke_compromised_keys()
@@ -444,7 +466,7 @@ def undo_keyed_arbitrary_package_attack(target_filepath):
   add_target_and_write_to_live(filename=target_filepath,
       file_content='Fresh firmware image')
 
-  print('COMPLETED UNDO ATTACK')
+  print(LOG_PREFIX + 'COMPLETED UNDO ATTACK')
 
 
 
@@ -493,6 +515,13 @@ def revoke_compromised_keys():
 
   global repo
 
+  # Pick names for the new Targets, Snapshot, and Timestamp keys. These will be
+  # the files created. We do this instead of overwriting the existing files
+  # because we want to be able to start over later with the same original state.
+  new_targets_keyname = 'new_maintargets'
+  new_timestamp_keyname = 'new_maintimestamp'
+  new_snapshot_keyname = 'new_mainsnapshot'
+
   # Grab the old public keys.
   old_targets_public_key = demo.import_public_key('maintargets')
   old_timestamp_public_key = demo.import_public_key('maintimestamp')
@@ -506,17 +535,17 @@ def revoke_compromised_keys():
 
 
   # Generate new public and private keys and import them.
-  demo.generate_key('maintargets')
-  new_targets_public_key = demo.import_public_key('maintargets')
-  new_targets_private_key = demo.import_private_key('maintargets')
+  demo.generate_key(new_targets_keyname)
+  new_targets_public_key = demo.import_public_key(new_targets_keyname)
+  new_targets_private_key = demo.import_private_key(new_targets_keyname)
 
-  demo.generate_key('maintimestamp')
-  new_timestamp_public_key = demo.import_public_key('maintimestamp')
-  new_timestamp_private_key = demo.import_private_key('maintimestamp')
+  demo.generate_key(new_timestamp_keyname)
+  new_timestamp_public_key = demo.import_public_key(new_timestamp_keyname)
+  new_timestamp_private_key = demo.import_private_key(new_timestamp_keyname)
 
-  demo.generate_key('mainsnapshot')
-  new_snapshot_public_key = demo.import_public_key('mainsnapshot')
-  new_snapshot_private_key = demo.import_private_key('mainsnapshot')
+  demo.generate_key(new_snapshot_keyname)
+  new_snapshot_public_key = demo.import_public_key(new_snapshot_keyname)
+  new_snapshot_private_key = demo.import_private_key(new_snapshot_keyname)
 
 
   # Associate the new public keys with the roles.
@@ -558,10 +587,11 @@ def kill_server():
   """
   global server_process
   if server_process is None:
-    print('No server to stop.')
+    print(LOG_PREFIX + 'No repository hosting process to stop.')
     return
 
   else:
-    print('Killing server process with pid: ' + str(server_process.pid))
+    print(LOG_PREFIX + 'Killing repository hosting process with pid: ' +
+        str(server_process.pid))
     server_process.kill()
     server_process = None

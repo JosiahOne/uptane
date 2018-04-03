@@ -14,16 +14,16 @@ import uptane # Import before TUF modules; may change tuf.conf values.
 import uptane.formats
 import uptane.common
 import uptane.encoding.asn1_codec as asn1_codec
+
+from uptane.encoding.asn1_codec import DATATYPE_TIME_ATTESTATION
+
 import tuf
 PYASN1_EXISTS = False
 try:
  import pyasn1.type
 except ImportError:
- print('Minor: pyasn1 library not found. Proceeding using JSON only.')
+ uptane.logger.error('pyasn1 library not found. Proceeding using JSON only.')
 else:
- #import uptane.ber_encoder as ber_encoder
- # TODO: Add the modules necessary to handle timeserver attestation ASN1
- # conversion to Uptane.
  PYASN1_EXISTS = True
 
 import time
@@ -77,7 +77,7 @@ def get_signed_time(nonces):
   uptane.common.sign_signable(
       signable_time_attestation,
       [timeserver_key],
-      datatype='time_attestation',
+      DATATYPE_TIME_ATTESTATION,
       metadata_format='json')
 
   return signable_time_attestation
@@ -104,9 +104,8 @@ def get_signed_time_der(nonces):
 
   # Convert it, re-signing over the hash of the DER encoding of the attestation.
   der_attestation = asn1_codec.convert_signed_metadata_to_der(
-      signable_time_attestation,
-      private_key=timeserver_key,
-      resign=True)
+      signable_time_attestation, DATATYPE_TIME_ATTESTATION,
+      private_key=timeserver_key, resign=True)
 
 
   return der_attestation

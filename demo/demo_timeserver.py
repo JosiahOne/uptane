@@ -25,6 +25,7 @@ import uptane
 import uptane.common
 import tuf.formats
 
+import threading
 from six.moves import xmlrpc_server
 from six.moves import xmlrpc_client # for Binary data encapsulation
 import uptane.services.timeserver as timeserver
@@ -33,6 +34,18 @@ import uptane.services.timeserver as timeserver
 import uptane.encoding.asn1_codec as asn1_codec
 import hashlib
 
+from uptane.encoding.asn1_codec import DATATYPE_TIME_ATTESTATION
+
+# Tell the reference implementation that we're in demo mode.
+# (Provided for consistency.) Currently, primary.py in the reference
+# implementation uses this to display banners for defenses that would otherwise
+# be hard to notice. No other reference implementation code (secondary.py,
+# director.py, etc.) currently uses this setting, but it could.
+uptane.DEMO_MODE = True
+
+LOG_PREFIX = uptane.WHITE + 'Timeserver:' + uptane.ENDCOLORS + ' '
+
+timeserver_listener_thread = None
 
 # Restrict director requests to a particular path.
 # Must specify RPC2 here for the XML-RPC interface to work.
@@ -79,10 +92,12 @@ def listen(use_new_keys=False):
    - get_signed_time(nonces)
   """
 
+  global timeserver_listener_thread
+
   # Set the timeserver's signing key.
-  print('Loading timeserver signing key.')
+  print(LOG_PREFIX + 'Loading timeserver signing key.')
   timeserver.set_timeserver_key(load_timeserver_key(use_new_keys))
-  print('Timeserver signing key loaded.')
+  print(LOG_PREFIX + 'Timeserver signing key loaded.')
 
 
   # Test locally before opening the XMLRPC port.
@@ -104,8 +119,12 @@ def listen(use_new_keys=False):
       get_signed_time_der_wrapper, 'get_signed_time_der')
 
 
-  print('Timeserver will now listen on port ' + str(demo.TIMESERVER_PORT))
-  server.serve_forever()
+  print(LOG_PREFIX + 'Timeserver will now listen on port ' +
+      str(demo.TIMESERVER_PORT))
+
+  timeserver_listener_thread = threading.Thread(target=server.serve_forever)
+  timeserver_listener_thread.setDaemon(True)
+  timeserver_listener_thread.start()
 
 
 
@@ -130,7 +149,7 @@ def test_demo_timeserver():
       timeserver_key_pub,
       signed_time['signatures'][0],
       signed_time['signed'],
-      datatype='time_attestation',
+      DATATYPE_TIME_ATTESTATION,
       metadata_format='json'
       ), 'Demo Timeserver self-test fail: unable to verify signature over JSON.'
 
@@ -148,14 +167,16 @@ def test_demo_timeserver():
 
   # Validate that signature.
   for pydict_again in [
-      asn1_codec.convert_signed_der_to_dersigned_json(der_signed_time),
-      asn1_codec.convert_signed_der_to_dersigned_json(xb_der_signed_time.data)]:
+      asn1_codec.convert_signed_der_to_dersigned_json(
+          der_signed_time, DATATYPE_TIME_ATTESTATION),
+      asn1_codec.convert_signed_der_to_dersigned_json(
+          xb_der_signed_time.data, DATATYPE_TIME_ATTESTATION)]:
 
     assert uptane.common.verify_signature_over_metadata(
         timeserver_key_pub,
         pydict_again['signatures'][0],
         pydict_again['signed'],
-        datatype='time_attestation',
+        DATATYPE_TIME_ATTESTATION,
         metadata_format='der'
         ), 'Demo Timeserver self-test fail: unable to verify signature over DER'
 
@@ -165,3 +186,4 @@ def test_demo_timeserver():
 
 if __name__ == '__main__':
   listen()
+  timeserver_listener_thread.join()
